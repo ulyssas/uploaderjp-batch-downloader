@@ -18,6 +18,8 @@ from urllib.parse import unquote
 import requests
 from bs4 import BeautifulSoup
 
+from translations import tr
+
 # CONFIG
 script_dir = Path(__file__).resolve().parent
 SAVE_DIR = script_dir / "downloads"
@@ -33,7 +35,7 @@ class LogLevel(Enum):
 
 
 def wait_for_exit():
-    print("スクリプトが完了しました。Enterキーを押すとウィンドウを閉じます。")
+    print(tr("WAIT_EXIT"))
     try:
         input()
     except (EOFError, KeyboardInterrupt):
@@ -66,7 +68,7 @@ def write_log(
             with log_path.open("a", encoding="utf-8") as f:
                 f.write(log_message + "\n")
         except Exception as e:
-            print(f"ログ書き込みエラー: {e}")
+            print(tr("ERR_LOG_WRITE", e))
 
 
 def check_or_create_csv(csv_path: Path) -> bool:
@@ -76,11 +78,7 @@ def check_or_create_csv(csv_path: Path) -> bool:
             writer.writerow(["url", "currentIndex", "isDownload"])
             writer.writerow(["https://u1.getuploader.com/sample/", "0", "1"])
 
-        write_log(
-            "setting.csvが見つかりませんでした。テンプレートを生成しました。\n"
-            "URLを記入してから再度実行してください。",
-            LogLevel.WARNING,
-        )
+        write_log(tr("WARN_CSV_TEMPLATE"), LogLevel.WARNING)
         return False
     return True
 
@@ -133,10 +131,7 @@ class UploaderClient:
             if age_btn:
                 res = self.request("POST", uploader_url, data={"q": "age_confirmation"})
                 res.raise_for_status()
-                write_log(
-                    f"{uploader_url}: 年齢確認ページだったため「確認」ボタンを押しセッション情報を更新しました。",
-                    log_path=log_path,
-                )
+                write_log(tr("INFO_AGE_CONFIRM", uploader_url), log_path=log_path)
 
             pattern = re.compile(
                 rf'<tr>\s*<td>\s*<a href="https://.+?\.getuploader\.com/{re.escape(uploader_id)}/download/(\d+)"'
@@ -145,11 +140,7 @@ class UploaderClient:
             return int(match.group(1)) if match else 0
 
         except Exception as e:
-            write_log(
-                f"{uploader_url}: 最新indexの取得中にエラーが発生しました: {e}",
-                LogLevel.ERROR,
-                log_path,
-            )
+            write_log(tr("ERR_GET_INDEX", uploader_url, e), LogLevel.ERROR, log_path)
             return 0
 
     def download_file(self, index: int, uploader_url: str):
@@ -163,31 +154,19 @@ class UploaderClient:
         try:
             res = self.request("GET", uri)
             if res.status_code == 404:
-                write_log(
-                    f"{index}: DLに失敗しました。ページが存在しません: 404",
-                    LogLevel.ERROR,
-                    log_path,
-                )
+                write_log(tr("ERR_NOT_FOUND", index), LogLevel.ERROR, log_path)
                 return
             res.raise_for_status()
 
             soup = BeautifulSoup(res.text, "html.parser")
 
             if soup.find("input", {"name": "password"}):
-                write_log(
-                    f"{index}: パスワード付きのためDLできませんでした",
-                    LogLevel.WARNING,
-                    log_path,
-                )
+                write_log(tr("WARN_PASSWD", index), LogLevel.WARNING, log_path)
                 return
 
             all_inputs = soup.find_all("input")
             if len(all_inputs) < 3:
-                write_log(
-                    f"{index}: token/MD5が見つかりませんでした",
-                    LogLevel.ERROR,
-                    log_path,
-                )
+                write_log(tr("ERR_TOKEN_MISSING", index), LogLevel.ERROR, log_path)
                 return
 
             page_md5 = self.get_input_val(all_inputs[1])
@@ -209,11 +188,7 @@ class UploaderClient:
                     break
 
             if not dl_url:
-                write_log(
-                    f"{index}: DLリンクの抽出に失敗しました",
-                    LogLevel.ERROR,
-                    log_path,
-                )
+                write_log(tr("ERR_DL_LINK", index), LogLevel.ERROR, log_path)
                 return
 
             file_name = dl_url.rstrip("/").split("/")[-1]
@@ -224,13 +199,12 @@ class UploaderClient:
                 file_md5 = self.calculate_md5(download_path)
                 if page_md5 and page_md5.lower() == file_md5.lower():
                     write_log(
-                        f"{index}: 既にファイルが存在します。正しいMD5です: {page_md5}",
-                        log_path=log_path,
+                        tr("INFO_EXISTS_GOOD", index, page_md5), log_path=log_path
                     )
                     return
                 else:
                     write_log(
-                        f"{index}: 既にファイルが存在しますが、ページとファイルでMD5が異なっています ([Page] {page_md5} : [File] {file_md5})",
+                        tr("ERR_EXISTS_BAD", index, page_md5, file_md5),
                         LogLevel.ERROR,
                         log_path,
                     )
@@ -245,30 +219,19 @@ class UploaderClient:
 
             file_md5 = self.calculate_md5(download_path)
             if page_md5 and page_md5.lower() == file_md5.lower():
-                write_log(
-                    f"{index}: DLに成功しました。正しいMD5です: {file_md5}",
-                    log_path=log_path,
-                )
+                write_log(tr("INFO_DL_SUCCESS", index, file_md5), log_path=log_path)
             else:
                 write_log(
-                    f"{index}: DLできましたが、ページとファイルでMD5が異なっています ([Page] {page_md5} : [File] {file_md5})",
+                    tr("ERR_DL_MD5_MISMATCH", index, page_md5, file_md5),
                     LogLevel.ERROR,
                     log_path,
                 )
 
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code if e.response else "Unknown"
-            write_log(
-                f"{index}: DLに失敗しました。サイトの応答がエラーです: {status}",
-                LogLevel.ERROR,
-                log_path,
-            )
+            write_log(tr("ERR_HTTP_RESPONSE", index, status), LogLevel.ERROR, log_path)
         except Exception as e:
-            write_log(
-                f"{index}: 何らかのエラーが発生しました: {e}",
-                LogLevel.ERROR,
-                log_path,
-            )
+            write_log(tr("ERR_DL_GENERIC", index, e), LogLevel.ERROR, log_path)
 
 
 def main():
@@ -282,7 +245,7 @@ def main():
         SAVE_DIR.mkdir(parents=True, exist_ok=True)
         LOG_DIR.mkdir(parents=True, exist_ok=True)
     except Exception as e:
-        write_log(f"設定値がおかしいです: {e}", LogLevel.ERROR)
+        write_log(tr("ERR_CONFIG", e), LogLevel.ERROR)
         wait_for_exit()
         return
 
@@ -294,17 +257,14 @@ def main():
 
     urls = [row["url"] for row in settings]
     if len(urls) != len(set(urls)):
-        write_log(
-            "アップローダーのURLが重複しています。重複が無いようにsetting.csvを修正してください。処理を中止します",
-            LogLevel.ERROR,
-        )
+        write_log(tr("ERR_CSV_DUPS"), LogLevel.ERROR)
         wait_for_exit()
         return
 
     # Batch download
     client = UploaderClient()
     updated = False
-    write_log("アップローダーの最新状況を確認します")
+    write_log(tr("INFO_CHECK_LATEST"))
     for row in settings:
         if row.get("isDownload") != "1":
             continue
@@ -314,19 +274,15 @@ def main():
         log_path = get_log_path(uploader_id)
 
         try:
-            write_log(f"{uploader_url}: 更新を確認します", log_path=log_path)
+            write_log(tr("INFO_CHECK_UPDATE", uploader_url), log_path=log_path)
             start_index = int(row.get("currentIndex", 0)) + 1
             latest_index = client.get_latest_index(uploader_url)
 
             if latest_index == 0:
-                write_log(
-                    f"{uploader_url}: ファイルページのURL番号が1つも取得できませんでした。アップローダーにファイルが1つも存在しないか、アップローダーのURLが間違っています",
-                    LogLevel.ERROR,
-                    log_path,
-                )
+                write_log(tr("ERR_NO_FILE", uploader_url), LogLevel.ERROR, log_path)
             elif latest_index >= start_index:
                 write_log(
-                    f"{uploader_url}: 新しいファイルがあったので {start_index} から {latest_index} までDLします",
+                    tr("INFO_FOUND_NEW", uploader_url, start_index, latest_index),
                     log_path=log_path,
                 )
                 for i in range(start_index, latest_index + 1):
@@ -334,15 +290,11 @@ def main():
 
                 row["currentIndex"] = str(latest_index)
                 updated = True
-                write_log(f"{uploader_url}: DLが終了しました", log_path=log_path)
+                write_log(tr("INFO_DL_FINISHED", uploader_url), log_path=log_path)
             else:
-                write_log(f"{uploader_url}: 更新はありませんでした", log_path=log_path)
+                write_log(tr("INFO_NO_UPDATE", uploader_url), log_path=log_path)
         except Exception as e:
-            write_log(
-                f"何らかのエラーが発生したためこのアップローダーの処理を中断します: {e}",
-                LogLevel.ERROR,
-                log_path,
-            )
+            write_log(tr("ERR_GENERIC", e), LogLevel.ERROR, log_path)
 
     # Update uploader registries
     if updated:
@@ -350,9 +302,9 @@ def main():
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(settings)
-        write_log("setting.csvを更新しました")
+        write_log(tr("INFO_UPDATE_REG"))
 
-    write_log("すべての処理が完了しました")
+    write_log(tr("INFO_FINISHED"))
     wait_for_exit()
 
 
