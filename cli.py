@@ -165,7 +165,8 @@ class UploaderClient:
             if res.status_code == 404:
                 write_log(
                     f"{index}: DLに失敗しました。ページが存在しません: 404",
-                    log_path=log_path,
+                    LogLevel.ERROR,
+                    log_path,
                 )
                 return
             res.raise_for_status()
@@ -295,7 +296,7 @@ def main():
     if len(urls) != len(set(urls)):
         write_log(
             "アップローダーのURLが重複しています。重複が無いようにsetting.csvを修正してください。処理を中止します",
-            LogLevel.WARNING,
+            LogLevel.ERROR,
         )
         wait_for_exit()
         return
