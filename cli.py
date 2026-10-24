@@ -10,6 +10,7 @@ import csv
 import hashlib
 import html
 import re
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -23,11 +24,16 @@ from bs4 import BeautifulSoup
 from translations import tr
 
 # CONFIG
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_SAVE_DIR = SCRIPT_DIR / "downloads"
+if getattr(sys, "frozen", False):
+    SCRIPT_DIR = Path(sys.executable).resolve().parent
+else:
+    SCRIPT_DIR = Path(__file__).resolve().parent
+
 DEFAULT_CSV_PATH = SCRIPT_DIR / "setting.csv"
+DEFAULT_SAVE_DIR = SCRIPT_DIR / "downloads"
 DEFAULT_LOG_DIR = SCRIPT_DIR / "log"
-DEFAULT_SLEEP_SEC = 0.5
+DEFAULT_SLEEP_SEC = 2.0
+CSV_HEADER = ["url", "currentIndex", "isDownload"]
 
 
 class LogLevel(Enum):
@@ -47,14 +53,13 @@ def write_log(
 
     if log_callback:
         log_callback(log_message, level)
-    else:
-        match level:
-            case LogLevel.WARNING:
-                print(f"\033[33m{log_message}\033[0m")
-            case LogLevel.ERROR:
-                print(f"\033[31m{log_message}\033[0m")
-            case _:
-                print(log_message)
+    match level:
+        case LogLevel.WARNING:
+            print(f"\033[33m{log_message}\033[0m")
+        case LogLevel.ERROR:
+            print(f"\033[31m{log_message}\033[0m")
+        case _:
+            print(log_message)
 
     if log_path:
         try:
@@ -64,23 +69,75 @@ def write_log(
         except Exception as e:
             if log_callback:
                 log_callback(tr("ERR_LOG_WRITE", e), LogLevel.ERROR)
-            else:
-                print(tr("ERR_LOG_WRITE", e))
+            print(tr("ERR_LOG_WRITE", e))
 
 
 def check_or_create_csv(
-    csv_path: Path,
-    log_callback: Callable[[str, LogLevel], None] | None = None,
+    csv_path: Path, log_callback: Callable[[str, LogLevel], None] | None = None
 ) -> bool:
     if not csv_path.exists():
         with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["url", "currentIndex", "isDownload"])
+            writer.writerow(CSV_HEADER)
             writer.writerow(["https://u1.getuploader.com/sample/", "0", "1"])
 
         write_log(tr("WARN_CSV_TEMPLATE"), LogLevel.WARNING, log_callback=log_callback)
         return False
     return True
+
+
+def load_csv(
+    csv_path: Path, log_callback: Callable[[str, LogLevel], None] | None = None
+) -> list[dict] | None:
+    # Initialization
+    try:
+        if not check_or_create_csv(csv_path, log_callback):
+            return None
+    except Exception as e:
+        write_log(tr("ERR_CONFIG", e), LogLevel.ERROR, log_callback=log_callback)
+        return None
+
+    # Verify and read uploader registries
+    with csv_path.open("r", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        settings = list(reader)
+
+        if not reader.fieldnames:
+            write_log(
+                tr("ERR_CONFIG", "CSV header missing"),
+                LogLevel.ERROR,
+                log_callback=log_callback,
+            )
+            return None
+        elif reader.fieldnames != CSV_HEADER:
+            write_log(
+                tr("ERR_CONFIG", "Incorrect CSV header"),
+                LogLevel.ERROR,
+                log_callback=log_callback,
+            )
+            return None
+
+    urls = [row["url"] for row in settings]
+    if len(urls) != len(set(urls)):
+        write_log(tr("ERR_CSV_DUPS"), LogLevel.ERROR, log_callback=log_callback)
+        return None
+
+    write_log(tr("INFO_CSV_LOADED", csv_path), log_callback=log_callback)
+    return settings
+
+
+def make_dirs(
+    save_dir: Path,
+    log_dir: Path,
+    log_callback: Callable[[str, LogLevel], None] | None = None,
+) -> bool:
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return True
+    except Exception as e:
+        write_log(tr("ERR_CONFIG", e), LogLevel.ERROR, log_callback=log_callback)
+        return False
 
 
 class UploaderClient:
@@ -136,10 +193,11 @@ class UploaderClient:
         url: str,
         data: dict | None = None,
         stream: bool = False,
+        timeout: tuple[float, float] | float = (10.0, 120.0),
     ):
         time.sleep(self.sleep_sec)
         response = self.session.request(
-            method=method, url=url, data=data, stream=stream, timeout=30
+            method=method, url=url, data=data, stream=stream, timeout=timeout
         )
         return response
 
@@ -286,28 +344,11 @@ def run_batch(
         write_log(message, level, log_path, log_callback)
 
     # Initialization
-    try:
-        if not check_or_create_csv(csv_path):
-            return False
-        save_dir.mkdir(parents=True, exist_ok=True)
-        log_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        _log(tr("ERR_CONFIG", e), LogLevel.ERROR)
+    settings = load_csv(csv_path, log_callback)
+    if settings is None:
         return False
 
-    # Verify and read uploader registries
-    with csv_path.open("r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        settings = list(reader)
-        fieldnames = reader.fieldnames
-
-        if not fieldnames:
-            _log(tr("ERR_CONFIG", "CSV header missing"), LogLevel.ERROR)
-            return False
-
-    urls = [row["url"] for row in settings]
-    if len(urls) != len(set(urls)):
-        _log(tr("ERR_CSV_DUPS"), LogLevel.ERROR)
+    if not make_dirs(save_dir, log_dir, log_callback):
         return False
 
     # Batch download
@@ -352,8 +393,9 @@ def run_batch(
     completed_files = 0
 
     if progress_callback:
-        progress_callback(0, max(total_files, 1), "Ready")
+        progress_callback(0, max(total_files, 1), tr("PROG_READY"))
 
+    log_path = Path()
     updated = False
     is_aborted = False
 
@@ -372,11 +414,24 @@ def run_batch(
                         completed_files, total_files, f"{uploader_id} #{i}"
                     )
 
-                client.download_file(i, uploader_url)
-                completed_files += 1
+                max_retries = 3
+                success = False
+                for attempt in range(1, max_retries + 1):
+                    if stop_event and stop_event.is_set():
+                        break
+                    if client.download_file(i, uploader_url):
+                        success = True
+                        break
+                    if attempt < max_retries:
+                        time.sleep(3 * attempt)
 
-                row["currentIndex"] = str(i)
-                updated = True
+                if success:
+                    completed_files += 1
+                    row["currentIndex"] = str(i)
+                    updated = True
+                else:
+                    break
+
             if is_aborted:
                 break
 
@@ -389,18 +444,18 @@ def run_batch(
         # Update uploader registries
         if updated:
             with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer = csv.DictWriter(f, fieldnames=CSV_HEADER)
                 writer.writeheader()
                 writer.writerows(settings)
-            _log(tr("INFO_UPDATE_REG"))
+            _log(tr("INFO_CSV_UPDATE"))
 
     if is_aborted:
-        _log("Process aborted by user.", LogLevel.WARNING)
+        _log(tr("WARN_ABORTED"), LogLevel.WARNING)
         return False
 
     _log(tr("INFO_FINISHED"))
     if progress_callback:
-        progress_callback(0, max(total_files, 1), "Completed")
+        progress_callback(0, max(total_files, 1), tr("PROG_COMPLETE"))
     return True
 
 
