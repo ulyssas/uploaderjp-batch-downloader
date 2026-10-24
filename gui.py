@@ -19,6 +19,7 @@ from cli import (
 )
 from translations import tr
 
+APP_VERSION = "v1.0.0"
 worker_thread: threading.Thread | None = None
 stop_event = threading.Event()
 
@@ -152,7 +153,7 @@ layout = [
 # fmt: on
 
 window = eg.Window(
-    tr("TITLE"),
+    tr("TITLE", APP_VERSION),
     layout,
     size=(700, 500),
     resizable=True,

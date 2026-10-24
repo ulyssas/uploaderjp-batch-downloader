@@ -38,7 +38,7 @@ MESSAGES = {
         "INFO_FINISHED": "すべての処理が完了しました",
         "WARN_ABORTED": "処理が中断されました",
         # GUI
-        "TITLE": "uploader.jp 一括ダウンローダー",
+        "TITLE": "uploader.jp 一括ダウンローダー {0}",
         "LABEL_CSV": "設定ファイル:",
         "BUTTON_OPEN": "参照",
         "BUTTON_RELOAD": "再読込",
@@ -87,7 +87,7 @@ MESSAGES = {
         "INFO_FINISHED": "All processes are complete.",
         "WARN_ABORTED": "Process aborted by user.",
         # GUI
-        "TITLE": "uploader.jp Batch Downloader",
+        "TITLE": "uploader.jp Batch Downloader {0}",
         "LABEL_CSV": "Setting file:",
         "BUTTON_OPEN": "Open",
         "BUTTON_RELOAD": "Reload",

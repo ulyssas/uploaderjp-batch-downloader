@@ -22,7 +22,7 @@ jobs:
             os: windows-11-arm
             arch_name: windows-arm64
           - label: macOS Intel
-            os: macos-15-intel
+            os: macos-26-intel
             arch_name: macos-x64
           - label: macOS ARM
             os: macos-latest
@@ -61,20 +61,41 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --windowed --name UploaderJPBatchDownloader gui.py
 
+      - name: Prepare release files (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Path release-files
+          Copy-Item -Recurse dist/UploaderJPBatchDownloader release-files/
+          Copy-Item README.md, LICENSE release-files/
+
+      - name: Prepare release files (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p release-files
+          cp -R dist/UploaderJPBatchDownloader.app release-files/
+          cp README.md LICENSE release-files/
+
+      - name: Prepare release files (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p release-files
+          cp -R dist/UploaderJPBatchDownloader release-files/
+          cp README.md LICENSE release-files/
+
       - name: Archive artifacts (Windows)
         if: runner.os == 'Windows'
         run: |
-          Compress-Archive -Path dist/UploaderJPBatchDownloader -DestinationPath UploaderJPBatchDownloader-${{ github.ref_name }}-${{ matrix.arch_name }}.zip
+          Compress-Archive -Path release-files/* -DestinationPath UploaderJPBatchDownloader-${{ github.ref_name }}-${{ matrix.arch_name }}.zip
 
       - name: Archive artifacts (Linux)
         if: runner.os == 'Linux'
         run: |
-          cd dist && zip -r ../UploaderJPBatchDownloader-${{ github.ref_name }}-${{ matrix.arch_name }}.zip UploaderJPBatchDownloader
+          cd release-files && zip -r ../UploaderJPBatchDownloader-${{ github.ref_name }}-${{ matrix.arch_name }}.zip .
 
       - name: Archive artifacts (macOS)
         if: runner.os == 'macOS'
         run: |
-          cd dist && zip -r -y ../UploaderJPBatchDownloader-${{ github.ref_name }}-${{ matrix.arch_name }}.zip UploaderJPBatchDownloader.app
+          cd release-files && zip -r -y ../UploaderJPBatchDownloader-${{ github.ref_name }}-${{ matrix.arch_name }}.zip .
 
       - name: Upload zip artifact
         uses: actions/upload-artifact@v7
