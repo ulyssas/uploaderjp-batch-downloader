@@ -23,8 +23,23 @@ from bs4 import BeautifulSoup
 
 from translations import tr
 
+
+def find_app_bundle() -> Path | None:
+    if sys.platform != "darwin" or not getattr(sys, "frozen", False):
+        return None
+
+    executable = Path(sys.executable).resolve()
+    return next(
+        (parent for parent in executable.parents if parent.suffix == ".app"),
+        None,
+    )
+
+
 # CONFIG
-if getattr(sys, "frozen", False):
+app_bundle = find_app_bundle()
+if app_bundle:
+    SCRIPT_DIR = app_bundle.parent
+elif getattr(sys, "frozen", False):
     SCRIPT_DIR = Path(sys.executable).resolve().parent
 else:
     SCRIPT_DIR = Path(__file__).resolve().parent
@@ -34,6 +49,7 @@ DEFAULT_SAVE_DIR = SCRIPT_DIR / "downloads"
 DEFAULT_LOG_DIR = SCRIPT_DIR / "log"
 DEFAULT_SLEEP_SEC = 2.0
 CSV_HEADER = ["url", "currentIndex", "isDownload"]
+UNWRITABLE_LOG_DIRS: set[Path] = set()
 
 
 class LogLevel(Enum):
@@ -61,12 +77,13 @@ def write_log(
         case _:
             print(log_message)
 
-    if log_path:
+    if log_path and log_path.parent not in UNWRITABLE_LOG_DIRS:
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8") as f:
                 f.write(log_message + "\n")
-        except Exception as e:
+        except OSError as e:
+            UNWRITABLE_LOG_DIRS.add(log_path.parent)
             if log_callback:
                 log_callback(tr("ERR_LOG_WRITE", e), LogLevel.ERROR)
             print(tr("ERR_LOG_WRITE", e))
@@ -133,11 +150,18 @@ def make_dirs(
 ) -> bool:
     try:
         save_dir.mkdir(parents=True, exist_ok=True)
-        log_dir.mkdir(parents=True, exist_ok=True)
-        return True
-    except Exception as e:
+    except OSError as e:
         write_log(tr("ERR_CONFIG", e), LogLevel.ERROR, log_callback=log_callback)
         return False
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        write_log(
+            tr("ERR_CONFIG", f"Failed to create log folder, {e}"),
+            LogLevel.WARNING,
+            log_callback=log_callback,
+        )
+    return True
 
 
 class UploaderClient:
