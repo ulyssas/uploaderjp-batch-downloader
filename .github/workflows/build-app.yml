@@ -10,7 +10,58 @@ permissions:
   contents: read
 
 jobs:
+  render-readme:
+    name: Render README with Jekyll
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Main
+        uses: actions/checkout@v5
+
+      - name: Prepare Jekyll source
+        run: |
+          mkdir pages
+          cat > pages/_config.yml <<'EOF'
+          title: uploader.jp Batch Downloader
+          theme: minima
+          baseurl: "."
+          EOF
+          {
+            printf '%s\n' \
+              '---' \
+              'layout: default' \
+              '---' \
+              '' \
+              '<style>.site-header, .site-footer { display: none; }</style>' \
+              ''
+            cat README.md
+          } > pages/index.md
+          if [ -d assets ]; then
+            cp -R assets pages/assets
+          fi
+
+      - name: Build site
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./pages
+          destination: ./_site
+
+      - name: Prepare rendered README artifact
+        run: |
+          mkdir release-site
+          cp -R _site/. release-site/
+          mv release-site/index.html release-site/README.html
+          rm -f release-site/feed.xml
+          sed -i 's|="/assets/|="assets/|g' release-site/README.html
+
+      - name: Upload rendered README and assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: rendered-readme
+          path: release-site
+          if-no-files-found: error
+
   build:
+    needs: render-readme
     strategy:
       fail-fast: false
       matrix:
@@ -66,21 +117,27 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path release-files
           Copy-Item -Recurse dist/UploaderJPBatchDownloader release-files/
-          Copy-Item README.md, LICENSE release-files/
+          Copy-Item LICENSE release-files/
 
       - name: Prepare release files (macOS)
         if: runner.os == 'macOS'
         run: |
           mkdir -p release-files
           cp -R dist/UploaderJPBatchDownloader.app release-files/
-          cp README.md LICENSE release-files/
+          cp LICENSE release-files/
 
       - name: Prepare release files (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p release-files
           cp -R dist/UploaderJPBatchDownloader release-files/
-          cp README.md LICENSE release-files/
+          cp LICENSE release-files/
+
+      - name: Add rendered README
+        uses: actions/download-artifact@v8
+        with:
+          name: rendered-readme
+          path: release-files
 
       - name: Archive artifacts (Windows)
         if: runner.os == 'Windows'
