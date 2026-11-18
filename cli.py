@@ -6,6 +6,7 @@ uploader.jp Batch Downloader CLI
 based on uploader.jp_downloader_v3 (https://note.com/3935/n/n9011ee06eb78)
 """
 
+import argparse
 import csv
 import hashlib
 import html
@@ -18,8 +19,8 @@ from enum import Enum
 from pathlib import Path
 from urllib.parse import unquote
 
-import requests
 from bs4 import BeautifulSoup
+from curl_cffi.requests import Session
 
 from translations import tr
 
@@ -35,6 +36,22 @@ def find_app_bundle() -> Path | None:
     )
 
 
+def parse_curl_command(curl_command: str) -> tuple[str, str]:
+    # extract user-agent
+    ua_match = re.search(
+        r"-H\s+['\"][^'\"]*?user-agent:\s*([^'\"]+)['\"]",
+        curl_command,
+        re.IGNORECASE,
+    )
+    user_agent = ua_match.group(1).strip() if ua_match else ""
+
+    # extract cf_clearance
+    cf_match = re.search(r"cf_clearance=([a-zA-Z0-9._-]+)", curl_command, re.IGNORECASE)
+    cf_clearance = cf_match.group(1).strip() if cf_match else ""
+
+    return user_agent, cf_clearance
+
+
 # CONFIG
 app_bundle = find_app_bundle()
 if app_bundle:
@@ -47,7 +64,7 @@ else:
 DEFAULT_CSV_PATH = SCRIPT_DIR / "setting.csv"
 DEFAULT_SAVE_DIR = SCRIPT_DIR / "downloads"
 DEFAULT_LOG_DIR = SCRIPT_DIR / "log"
-DEFAULT_SLEEP_SEC = 2.0
+DEFAULT_SLEEP_SEC = 3.0
 CSV_HEADER = ["url", "currentIndex", "isDownload"]
 UNWRITABLE_LOG_DIRS: set[Path] = set()
 
@@ -172,23 +189,41 @@ class UploaderClient:
         sleep_sec: float = DEFAULT_SLEEP_SEC,
         log_callback: Callable[[str, LogLevel], None] | None = None,
         stop_event: threading.Event | None = None,
+        user_agent: str = "",
+        cf_clearance: str = "",
     ):
         self.save_dir = save_dir
         self.log_dir = log_dir
         self.sleep_sec = sleep_sec
         self.log_callback = log_callback
         self.stop_event = stop_event
+        self.user_agent = user_agent
+        self.cf_clearance = cf_clearance
 
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-                    "AppleWebKit/537.36 (KHTML, like Gecko)"
-                    "Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0"
-                ),
-            }
-        )
+        # impersonate Chrome
+        self.session = Session(impersonate="chrome")
+
+        # set headers
+        headers = {
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "accept-language": "en-US,en;q=0.7",
+            "sec-ch-ua-mobile": "?0",
+            "sec-fetch-dest": "document",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin",
+            "user-agent": "",
+        }
+        if self.user_agent:
+            headers["user-agent"] = self.user_agent
+
+        self.session.headers.update(headers)
+
+        # cf_clearance Cookie
+        if self.cf_clearance:
+            self.session.cookies.set(
+                "cf_clearance", self.cf_clearance, domain=".getuploader.com"
+            )
 
     def _log(
         self,
@@ -217,7 +252,7 @@ class UploaderClient:
         url: str,
         data: dict | None = None,
         stream: bool = False,
-        timeout: tuple[float, float] | float = (10.0, 120.0),
+        timeout: float = 60.0,
     ):
         time.sleep(self.sleep_sec)
         response = self.session.request(
@@ -237,7 +272,7 @@ class UploaderClient:
             if age_btn:
                 res = self.request("POST", uploader_url, data={"q": "age_confirmation"})
                 res.raise_for_status()
-                write_log(tr("INFO_AGE_CONFIRM", uploader_url), log_path=log_path)
+                self._log(tr("INFO_AGE_CONFIRM", uploader_url), log_path=log_path)
 
             pattern = re.compile(
                 rf'<tr>\s*<td>\s*<a href="https://.+?\.getuploader\.com/{re.escape(uploader_id)}/download/(\d+)"'
@@ -246,7 +281,27 @@ class UploaderClient:
             return int(match.group(1)) if match else 0
 
         except Exception as e:
-            write_log(tr("ERR_GET_INDEX", uploader_url, e), LogLevel.ERROR, log_path)
+            resp = getattr(e, "response", None)
+            status = getattr(resp, "status_code", 0)
+            if resp is not None and status > 0:
+                is_cf = status == 403 and (
+                    "Just a moment" in getattr(resp, "text", "")
+                    or "cloudflare"
+                    in getattr(resp, "headers", {}).get("Server", "").lower()
+                )
+
+                if is_cf:
+                    err_detail = tr("ERR_CLOUDFLARE")
+                else:
+                    err_detail = f"status={status}, server={resp.headers.get('Server')}"
+            else:
+                err_detail = str(e)
+
+            self._log(
+                tr("ERR_GET_INDEX", uploader_url, err_detail),
+                LogLevel.ERROR,
+                log_path,
+            )
             return 0
 
     def download_file(self, index: int, uploader_url: str) -> bool:
@@ -320,14 +375,19 @@ class UploaderClient:
                     )
                     return True
 
-            with self.request("GET", dl_url, stream=True) as dl_res:
+            try:
+                dl_res = self.request("GET", dl_url, stream=True)
                 dl_res.raise_for_status()
+
                 with download_path.open("wb") as f:
                     for chunk in dl_res.iter_content(chunk_size=8192):
                         if self.stop_event and self.stop_event.is_set():
                             return False
                         if chunk:
                             f.write(chunk)
+            finally:
+                if hasattr(dl_res, "close"):
+                    dl_res.close()
 
             file_md5 = self.calculate_md5(download_path)
             if page_md5 and page_md5.lower() == file_md5.lower():
@@ -341,11 +401,31 @@ class UploaderClient:
                 )
                 return True
 
-        except requests.exceptions.HTTPError as e:
-            status = e.response.status_code if e.response else "Unknown"
-            self._log(tr("ERR_HTTP_RESPONSE", index, status), LogLevel.ERROR, log_path)
-            return False
         except Exception as e:
+            response = getattr(e, "response", None)
+            if response is not None:
+                status = getattr(response, "status_code", "Unknown")
+
+                is_cf = status == 403 and (
+                    "Just a moment" in getattr(response, "text", "")
+                    or "cloudflare"
+                    in getattr(response, "headers", {}).get("Server", "").lower()
+                )
+
+                if is_cf:
+                    self._log(
+                        tr("ERR_CLOUDFLARE"),
+                        LogLevel.ERROR,
+                        log_path,
+                    )
+                else:
+                    self._log(
+                        tr("ERR_HTTP_RESPONSE", index, status),
+                        LogLevel.ERROR,
+                        log_path,
+                    )
+                return False
+
             self._log(tr("ERR_DL_GENERIC", index, e), LogLevel.ERROR, log_path)
             return False
 
@@ -358,6 +438,8 @@ def run_batch(
     log_callback: Callable[[str, LogLevel], None] | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
     stop_event: threading.Event | None = None,
+    user_agent: str = "",
+    cf_clearance: str = "",
 ) -> bool:
 
     def _log(
@@ -382,6 +464,8 @@ def run_batch(
         sleep_sec=sleep_sec,
         log_callback=log_callback,
         stop_event=stop_event,
+        user_agent=user_agent,
+        cf_clearance=cf_clearance,
     )
     _log(tr("INFO_CHECK_LATEST"))
 
@@ -483,6 +567,7 @@ def run_batch(
     return True
 
 
+# CLI functions
 def wait_for_exit():
     print(tr("WAIT_EXIT"))
     try:
@@ -491,8 +576,36 @@ def wait_for_exit():
         pass
 
 
+def parse_cli_args():
+    """CLI: get cf_clearance & user-agent as an argument"""
+
+    parser = argparse.ArgumentParser(
+        description="uploader.jp Batch Downloader CLI, based on uploader.jp_downloader_v3 (https://note.com/3935/n/n9011ee06eb78)"
+    )
+    parser.add_argument(
+        "cURL",
+        help="Paste the result of `Copy > Copy as cURL` from DevTools in Chromium-based browsers.",
+    )
+    args = parser.parse_args()
+
+    user_agent, cf_clearance = parse_curl_command(args.cURL)
+
+    if not cf_clearance:
+        print("\n[ERROR] No cf_clearance Cookie found!")
+        sys.exit(1)
+
+    if not user_agent:
+        print("\n[WARNING] Could not get user agent.")
+
+    return user_agent, cf_clearance
+
+
 def main():
-    run_batch()
+    ua, cf = parse_cli_args()
+    run_batch(
+        user_agent=ua,
+        cf_clearance=cf,
+    )
     wait_for_exit()
 
 

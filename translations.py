@@ -37,6 +37,7 @@ MESSAGES = {
         "INFO_CSV_UPDATE": "setting.csvを更新しました",
         "INFO_FINISHED": "すべての処理が完了しました",
         "WARN_ABORTED": "処理が中断されました",
+        "ERR_CLOUDFLARE": "Cloudflareブロック (cf_clearance が期限切れまたは無効です)",
         # GUI
         "TITLE": "uploader.jp 一括ダウンローダー {0}",
         "LABEL_CSV": "設定ファイル:",
@@ -86,6 +87,7 @@ MESSAGES = {
         "INFO_CSV_UPDATE": "Updated setting.csv.",
         "INFO_FINISHED": "All processes are complete.",
         "WARN_ABORTED": "Process aborted by user.",
+        "ERR_CLOUDFLARE": "Cloudflare Blocked (cf_clearance is expired or invalid)",
         # GUI
         "TITLE": "uploader.jp Batch Downloader {0}",
         "LABEL_CSV": "Setting file:",
