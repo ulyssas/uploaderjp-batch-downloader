@@ -40,6 +40,9 @@ MESSAGES = {
         "ERR_CLOUDFLARE": "Cloudflareブロック (cf_clearance が期限切れまたは無効です)",
         # GUI
         "TITLE": "uploader.jp 一括ダウンローダー {0}",
+        "BUTTON_CURL": "cURLペースト",
+        "LABEL_CURL": "ChromiumベースのブラウザからcURLを貼り付けてください",
+        "ERR_NO_CURL": "cURLが存在しないか無効です。",
         "LABEL_CSV": "設定ファイル:",
         "BUTTON_OPEN": "参照",
         "BUTTON_RELOAD": "再読込",
@@ -90,6 +93,9 @@ MESSAGES = {
         "ERR_CLOUDFLARE": "Cloudflare Blocked (cf_clearance is expired or invalid)",
         # GUI
         "TITLE": "uploader.jp Batch Downloader {0}",
+        "BUTTON_CURL": "Paste cURL",
+        "LABEL_CURL": "Paste cURL from Chromium-based browsers",
+        "ERR_NO_CURL": "cURL does not exist or invalid.",
         "LABEL_CSV": "Setting file:",
         "BUTTON_OPEN": "Open",
         "BUTTON_RELOAD": "Reload",

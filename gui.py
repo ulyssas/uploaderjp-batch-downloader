@@ -15,6 +15,7 @@ from cli import (
     LogLevel,
     load_csv,
     make_dirs,
+    parse_curl_command,
     run_batch,
 )
 from translations import tr
@@ -22,6 +23,9 @@ from translations import tr
 APP_VERSION = "v1.0.0"
 worker_thread: threading.Thread | None = None
 stop_event = threading.Event()
+
+current_user_agent: str = ""
+current_cf_clearance: str = ""
 
 
 def print_gui(win: eg.Window, log_message: str, level: LogLevel):
@@ -82,6 +86,11 @@ def setup(win: eg.Window, csv_path: Path):
 
 # fmt: off
 layout = [
+    # cURL command Load
+    [
+        eg.Button(tr("BUTTON_CURL"), key="-CURL_PASTE"),
+        eg.Text(tr("LABEL_CURL"), key="-CURL_TEXT"),
+    ],
     # CSV Load
     [
         eg.Text(tr("LABEL_CSV")),
@@ -155,10 +164,10 @@ layout = [
 window = eg.Window(
     tr("TITLE", APP_VERSION),
     layout,
-    size=(700, 500),
+    size=(700, 550),
     resizable=True,
 )
-window.window.minsize(500, 500)
+window.window.minsize(500, 550)
 window.read(timeout=0)
 window.window.update_idletasks()
 
@@ -190,6 +199,24 @@ while True:
         window["-SAVE_DIR"].update(readonly=False)
         window["-SAVE_OPEN"].update(disabled=False)
 
+    elif event == "-CURL_PASTE":
+        try:
+            cb_text = eg.utils.get_clipboard()
+        except Exception:
+            cb_text = ""
+
+        ua, cf = parse_curl_command(cb_text)
+        if cf:
+            current_user_agent = ua
+            current_cf_clearance = cf
+            ua_preview = (ua[:50] + "...") if len(ua) > 50 else ua
+            window["-CURL_TEXT"].update(
+                text=f"✔ {ua_preview}" if ua_preview else "✔ cf_clearance OK",
+                text_color="green",
+            )
+        else:
+            window["-CURL_TEXT"].update(text=tr("ERR_NO_CURL"), text_color="red")
+
     elif event == "-CSV_RELOAD" or event == "-CSV_OPEN":
         refresh_table(window, values["-CSV_PATH"])
     elif event == "-OPEN_DIR":
@@ -198,6 +225,10 @@ while True:
         window["-LOG"].update(text="")
     elif event == "-START":
         if worker_thread and worker_thread.is_alive():
+            continue
+
+        if not current_cf_clearance:
+            eg.popup(tr("ERR_NO_CURL"), title="Error")
             continue
 
         stop_event.clear()
@@ -221,6 +252,8 @@ while True:
                 "log_callback": gui_logger,
                 "progress_callback": gui_progress,
                 "stop_event": stop_event,
+                "user_agent": current_user_agent,
+                "cf_clearance": current_cf_clearance,
             },
             daemon=True,
         )
