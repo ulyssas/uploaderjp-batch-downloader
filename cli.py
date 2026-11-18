@@ -375,6 +375,7 @@ class UploaderClient:
                     )
                     return True
 
+            dl_res = None
             try:
                 dl_res = self.request("GET", dl_url, stream=True)
                 dl_res.raise_for_status()

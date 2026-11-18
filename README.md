@@ -21,6 +21,31 @@ For more details, check out the [original author's guide](https://note.com/3935/
 
 ---
 
+### v1.1 Update / v1.1での変更点
+
+![curl_copy](assets/cURL.png)
+
+The Batch Downloader has now been updated to work around bot protection that has been added to the website.
+
+To use it, open an uploader page in a Chromium-based browser (Chrome, Edge, Brave, etc.) (complete any Cloudflare verification if it appears), open `DevTools` and go to `Network` tab.
+Then, right-click on "Uploader ID" (e.g. `aoonizenbu` for URL "https://uu.getuploader.com/aoonizenbu/") and `Copy > Copy as cURL`.
+
+- if Uploader ID doesn't appear, keep the DevTools opened and reload the page.
+- if there are two, copy the one with **`Status 200`**, not 302.
+
+After that, you can paste the command using the downloader's top button (`Paste cURL`). The browser's Cookie might expire (`Cloudflare Blocked` error) while downloading, so **you might have to do this multiple times**.
+
+---
+
+一括ダウンローダーが更新され、サイトのボット検知を回避するようになりました。
+
+使うには、アップローダーのページをChromium系のブラウザー (Chrome, Edge, Brave等) で開き (Cloudflareの画面が出たら認証を完了してください)、`デベロッパー ツール`を開いて`ネットワーク (Network)`タブを開きます。
+そして、"アップローダーID" ("https://uu.getuploader.com/aoonizenbu/"なら`aoonizenbu`) を右クリックし、`コピー > cURLとしてコピー (Copy > Copy as cURL)`を押してください。
+
+- アップローダーIDが表示されない場合は、デベロッパー ツールを開いたままページを更新してください。
+- 2つある場合は、**`Status 200`** (302ではない方) を選んでください。
+
+それから、ダウンローダーの上部のボタン (`cURLペースト`) を押すと貼り付けることができます。ダウンロード中にブラウザのCookieが期限切れ (`Cloudflareブロック` エラー) になった場合は、同じ手順で貼り付け直してください。
 
 ## Disclaimer / 免責事項
 

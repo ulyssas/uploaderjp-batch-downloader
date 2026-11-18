@@ -20,7 +20,7 @@ from cli import (
 )
 from translations import tr
 
-APP_VERSION = "v1.0.0"
+APP_VERSION = "v1.1.0"
 worker_thread: threading.Thread | None = None
 stop_event = threading.Event()
 
